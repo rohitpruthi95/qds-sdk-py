@@ -23,61 +23,6 @@ def view_templates_side_effect(*args, **kwargs):
 
 class TestHiveCommandTemplate(QdsCliTestCase):
     
-    def test_create_no_name(self):
-        sys.argv = ['qds.py', 'commandtemplates', 'hivecmd',
-         '--query', 'select * from \$table_name\$', '--input_vars', "table_name='doctors'"]
-        print_command()
-        with self.assertRaises(SystemExit) as cm:
-            qds.main()
-
-        self.assertEqual(cm.exception.code, 2)
-    
-    def test_create_no_query_no_script_location(self):
-        sys.argv = ['qds.py', 'commandtemplates', 'hivecmd',
-         '--name', 'no_query_no_script_location']
-        print_command()
-        with self.assertRaises(ParseError) as cm:
-            qds.main()
-
-    def test_create_both_query_script_location(self):
-        sys.argv = ['qds.py', 'commandtemplates', 'hivecmd',
-         '--name', 'both_query_script_location','--query', 'show tables', '--script_location', 'random location']
-        print_command()
-        with self.assertRaises(SystemExit) as cm:
-            qds.main()
-    
-        self.assertEqual(cm.exception.code, 2)
-
-class TestPrestoCommandTemplate(QdsCliTestCase):
-    
-    def test_create_no_name(self):
-        sys.argv = ['qds.py', 'commandtemplates', 'prestocmd',
-         '--query', 'select * from \$table_name\$', '--input_vars', "table_name='doctors'"]
-        print_command()
-        with self.assertRaises(SystemExit) as cm:
-            qds.main()
-
-        self.assertEqual(cm.exception.code, 2)
-    
-    def test_create_no_query_no_script_location(self):
-        sys.argv = ['qds.py', 'commandtemplates', 'prestocmd',
-         '--name', 'no_query_no_script_location']
-        print_command()
-        with self.assertRaises(ParseError) as cm:
-            qds.main()
-
-    def test_create_both_query_script_location(self):
-        sys.argv = ['qds.py', 'commandtemplates', 'prestocmd',
-         '--name', 'both_query_script_location','--query', 'show tables', '--script_location', 'random location']
-        print_command()
-        with self.assertRaises(SystemExit) as cm:
-            qds.main()
-    
-        self.assertEqual(cm.exception.code, 2)
-
-
-class TestCommandTemplate(QdsCliTestCase):
-
     def test_hivecmd(self):
         sys.argv = ['qds.py', 'commandtemplates', 'hivecmd','--name', 'cmdtest',
          '--query', 'select * from \$table_name\$', '--input_vars', "table_name='doctors'"]
@@ -91,6 +36,77 @@ class TestCommandTemplate(QdsCliTestCase):
              'command':{'query':'select * from \$table_name\$','command_type':'HiveCommand'}
             })
 
+    def test_create_no_name(self):
+        sys.argv = ['qds.py', 'commandtemplates', 'hivecmd',
+         '--query', 'select * from \$table_name\$', '--input_vars', "table_name='doctors'"]
+        print_command()
+        with self.assertRaises(SystemExit) as cm:
+            qds.main()
+
+        self.assertEqual(cm.exception.code, 2)
+    
+    def test_create_no_query_no_script_location(self):
+        sys.argv = ['qds.py', 'commandtemplates', 'hivecmd',
+         '--name', 'no_query_no_script_location']
+        print_command()
+        with self.assertRaises(SystemExit) as cm:
+            qds.main()
+    
+        self.assertEqual(cm.exception.code, 2)
+
+    def test_create_both_query_script_location(self):
+        sys.argv = ['qds.py', 'commandtemplates', 'hivecmd',
+         '--name', 'both_query_script_location','--query', 'show tables', '--script_location', 'random location']
+        print_command()
+        with self.assertRaises(SystemExit) as cm:
+            qds.main()
+    
+        self.assertEqual(cm.exception.code, 2)
+
+class TestPrestoCommandTemplate(QdsCliTestCase):
+    
+    def test_prestocmd(self):
+        sys.argv = ['qds.py', 'commandtemplates', 'prestocmd','--name', 'cmdtest',
+         '--query', 'select * from \$table_name\$', '--input_vars', "table_name='doctors'"]
+        print_command()
+        Connection._api_call = Mock(return_value={})
+        qds.main()
+        Connection._api_call.assert_called_with("POST", "command_templates", 
+            {'name': 'cmdtest',
+             'input_vars': [{'name':'table_name','default_value':"'doctors'"}],
+             'command_type':'PrestoCommand',
+             'command':{'query':'select * from \$table_name\$','command_type':'PrestoCommand'}
+            })
+
+    def test_create_no_name(self):
+        sys.argv = ['qds.py', 'commandtemplates', 'prestocmd',
+         '--query', 'select * from \$table_name\$', '--input_vars', "table_name='doctors'"]
+        print_command()
+        with self.assertRaises(SystemExit) as cm:
+            qds.main()
+
+        self.assertEqual(cm.exception.code, 2)
+    
+    def test_create_no_query_no_script_location(self):
+        sys.argv = ['qds.py', 'commandtemplates', 'prestocmd',
+         '--name', 'no_query_no_script_location']
+        print_command()
+        with self.assertRaises(SystemExit) as cm:
+            qds.main()
+    
+        self.assertEqual(cm.exception.code, 2)
+
+    def test_create_both_query_script_location(self):
+        sys.argv = ['qds.py', 'commandtemplates', 'prestocmd',
+         '--name', 'both_query_script_location','--query', 'show tables', '--script_location', 'random location']
+        print_command()
+        with self.assertRaises(SystemExit) as cm:
+            qds.main()
+    
+        self.assertEqual(cm.exception.code, 2)
+
+class TestCommandTemplate(QdsCliTestCase):
+
     def test_view(self):
         sys.argv = ['qds.py', 'commandtemplates', 'view', '--id', '123']
         print_command()
@@ -98,7 +114,28 @@ class TestCommandTemplate(QdsCliTestCase):
         qds.main()
         Connection._api_call.assert_called_with("GET", "command_templates/123", params=None)
 
+    def test_view_name(self):
+        sys.argv = ['qds.py', 'commandtemplates', 'view', '--name', 'Show']
+        print_command()
+        Connection._api_call = Mock(return_value={})
+        qds.main()
+        Connection._api_call.assert_called_with("GET", "command_templates/123", params={'template_name': 'Show'})
 
+    def test_view_no_id_no_name(self):
+        sys.argv = ['qds.py', 'commandtemplates', 'view']
+        print_command()
+        with self.assertRaises(ParseError) as cm:
+            qds.main()
+    # qdd.py commandtemplates view
+    # qds.py commandtemplates view --name
+    # qds.py commandtemplates view --fields
+    # qds.py commandtemplates list
+    # qds.py commandtemplates list --fields
+    # qds.py commandtemplates list --per-page
+    # qds.py commandtemplates list --page
+    # qds.py commandtemplates run ID
+    # qds.py commandtemplates run_and_wait ID
+    # qds.py commandtemplates run_and_wait ID --input_vars
     def test_remove(self):
         sys.argv = ['qds.py', 'commandtemplates', 'remove', '123']
         print_command()
