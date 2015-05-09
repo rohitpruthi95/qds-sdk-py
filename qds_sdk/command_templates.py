@@ -10,6 +10,11 @@ import argparse
 class CommandTemplateCmdLine:
     hiveparser = None
     prestoparser = None
+    list_allparser = None
+    viewparser = None
+    removeparser = None
+    runparser = None
+    run_and_waitparser = None
     @staticmethod
     def parsers():
         argparser = ArgumentParser(prog="qds.py commandtemplates",
@@ -24,7 +29,7 @@ class CommandTemplateCmdLine:
         hivecmd.add_argument("--input_vars",
             help="Add names and values for input variables", dest="input_vars", nargs="*")
 
-        hivecmdgroup = hivecmd.add_mutually_exclusive_group()
+        hivecmdgroup = hivecmd.add_mutually_exclusive_group(required=True)
 
         hivecmdgroup.add_argument("--query", dest="query", help="Hive query")
 
@@ -43,7 +48,7 @@ class CommandTemplateCmdLine:
         prestocmd.add_argument("--input_vars",
             help="Add names and values for input variables", dest="input_vars", nargs="*")
 
-        prestocmdgroup = prestocmd.add_mutually_exclusive_group()
+        prestocmdgroup = prestocmd.add_mutually_exclusive_group(required=True)
 
         prestocmdgroup.add_argument("--query", dest="query", help="Presto query")
 
@@ -57,38 +62,46 @@ class CommandTemplateCmdLine:
         
         CommandTemplateCmdLine.prestoparser = prestocmd
 
+        #list_all command
         list_all = subparsers.add_parser("list", help="List all available command templates")
 
         list_all.add_argument("--fields", nargs="*", dest="fields",
                           help="List of fields to show")
-        list_all.add_argument("--per-page", dest="per_page",
+        list_all.add_argument("--per-page", dest="per_page", type=int, 
                           help="Number of items per page")
-        list_all.add_argument("--page", dest="page",
+        list_all.add_argument("--page", dest="page", type=int,
                           help="Page Number")
 
         list_all.set_defaults(func=CommandTemplateCmdLine.list_all)
+        CommandTemplateCmdLine.list_allparser = list_all
 
+        #view command
         view = subparsers.add_parser("view",
                                      help="View a specific command template")
-        view.add_argument("--id", help="Numeric id of the command template", dest="id")
+        view.add_argument("--id", help="Numeric id of the command template", dest="id", type=int)
         view.add_argument("--name", help="Name of the command template", dest="name")
         view.add_argument("--fields", nargs="*", dest="fields",
                           help="List of fields to show")
         view.set_defaults(func=CommandTemplateCmdLine.view)
+        CommandTemplateCmdLine.viewparser = view
 
+        #remove command
         remove = subparsers.add_parser("remove",
                                      help="Remove a specific command template")
-        remove.add_argument("id", help="Numeric id of the command template")
+        remove.add_argument("id", help="Numeric id of the command template", type=int)
         remove.set_defaults(func=CommandTemplateCmdLine.remove)
+        CommandTemplateCmdLine.removeparser = remove
+        CommandTemplateCmdLine.removeparser = remove
 
-
+        #run command
         run = subparsers.add_parser("run", help="Run a command template")
-
         run.add_argument("id", help="Numeric id of the command template")
         run.add_argument("--input_vars",
             help="Add names and values for input variables", dest="input_vars", nargs="*")
         run.set_defaults(func=CommandTemplateCmdLine.run_template)
+        CommandTemplateCmdLine.runparser = run
 
+        #run_and_wait command
         run_and_wait = subparsers.add_parser("run_and_wait", 
             help="Run a command template and wait for it to complete")
 
@@ -97,7 +110,7 @@ class CommandTemplateCmdLine:
             help="Add name and values of input variables", dest="input_vars", nargs="*")
 
         run_and_wait.set_defaults(func=CommandTemplateCmdLine.run_and_wait)
-
+        CommandTemplateCmdLine.run_and_waitparser = run_and_wait
         return argparser
 
     @staticmethod
@@ -107,7 +120,27 @@ class CommandTemplateCmdLine:
     @staticmethod
     def get_prestocmd_help():
         return CommandTemplateCmdLine.prestoparser.format_help()
-    
+
+    @staticmethod
+    def get_list_all_help():
+        return CommandTemplateCmdLine.list_allparser.format_help()
+
+    @staticmethod
+    def get_view_help():
+        return CommandTemplateCmdLine.viewparser.format_help()
+
+    @staticmethod
+    def get_remove_help():
+        return CommandTemplateCmdLine.removeparser.format_help()
+
+    @staticmethod
+    def get_run_help():
+        return CommandTemplateCmdLine.runparser.format_help()
+
+    @staticmethod
+    def get_run_and_wait_help():
+        return CommandTemplateCmdLine.run_and_waitparser.format_help()
+
     @staticmethod
     def run(args):
         parser = CommandTemplateCmdLine.parsers()
@@ -117,8 +150,11 @@ class CommandTemplateCmdLine:
     @staticmethod
     def filter_fields(schedule, fields):
         filtered = {}
-        for field in fields:
-            filtered[field] = schedule[field]
+        try:
+            for field in fields:
+                filtered[field] = schedule[field]
+        except KeyError, e:
+            raise ParseError("Incorrect field name ",CommandTemplateCmdLine.get_list_all_help() )
         return filtered
 
     @staticmethod
@@ -146,7 +182,7 @@ class CommandTemplateCmdLine:
         elif args.name:
             commandtemplate = CommandTemplate.find_by_name(args.name)
         else:
-            return "Either template id or template name must be specified"
+            raise ParseError("Either template id or template name must be specified",CommandTemplateCmdLine.get_view_help() ) 
         if args.fields:
             commandtemplate.attributes = CommandTemplateCmdLine.filter_fields(schedule.attributes, args.fields)
         return json.dumps(commandtemplate.attributes, sort_keys=True, indent=4)
@@ -202,34 +238,22 @@ class CommandTemplate(Resource):
         data['command'] = {}
         
         hivecmd_help = CommandTemplateCmdLine.get_hivecmd_help()
-        
-        if args.query is None and args.script_location is None:
-            raise ParseError("One of Query or Script Location must be specified ",hivecmd_help )
-        
-        
         if args.script_location is not None:
-            if args.query is not None:
-                # this part is actually redundant because we are using mutually exclusive group
-                # unreachable code
-                # actaul error raised would system.exit
-                raise ParseError("Both Query and Script_location can't be specified:",
-                                 hivecmd_help)
+            if ((args.script_location.find("s3://") != 0) and
+                (args.script_location.find("s3n://") != 0)):
+
+                # script location is local file
+
+                try:
+                    q = open(args.script_location).read()
+                except IOError as e:
+                    raise ParseError("Unable to open script location: %s" %
+                                     str(e),
+                                     hivecmd_help)
+                data['command']['query'] = q
             else:
-                if ((args.script_location.find("s3://") != 0) and
-                    (args.script_location.find("s3n://") != 0)):
-
-                    # script location is local file
-
-                    try:
-                        q = open(args.script_location).read()
-                    except IOError as e:
-                        raise ParseError("Unable to open script location: %s" %
-                                         str(e),
-                                         hivecmd_help)
-                    data['command']['query'] = q
-                else:
-                    data['command']['script_location'] = args.script_location
-        
+                data['command']['script_location'] = args.script_location
+    
         if args.query is not None:
             data['command']['query'] = args.query
         data['command']['command_type'] = "HiveCommand"
@@ -261,31 +285,22 @@ class CommandTemplate(Resource):
         
         prestocmd_help = CommandTemplateCmdLine.get_prestocmd_help()
         
-        if args.query is None and args.script_location is None:
-            raise ParseError("One of Query or Script Location must be specified ",
-                             prestocmd_help)
-        
-        
         if args.script_location is not None:
-            if args.query is not None:
-                raise ParseError("Both Query and Script_location can't be specified:",
-                                 prestocmd_help)
+            if ((args.script_location.find("s3://") != 0) and
+                (args.script_location.find("s3n://") != 0)):
+
+                # script location is local file
+
+                try:
+                    q = open(args.script_location).read()
+                except IOError as e:
+                    raise ParseError("Unable to open script location: %s" %
+                                     str(e),
+                                     prestocmd_help)
+                data['command']['query'] = q
             else:
-                if ((args.script_location.find("s3://") != 0) and
-                    (args.script_location.find("s3n://") != 0)):
-
-                    # script location is local file
-
-                    try:
-                        q = open(args.script_location).read()
-                    except IOError as e:
-                        raise ParseError("Unable to open script location: %s" %
-                                         str(e),
-                                         prestocmd_help)
-                    data['command']['query'] = q
-                else:
-                    data['command']['script_location'] = args.script_location
-        
+                data['command']['script_location'] = args.script_location
+    
         if args.query is not None:
             data['command']['query'] = args.query
         
@@ -318,7 +333,10 @@ class CommandTemplate(Resource):
     def find_by_name(name):
         conn = Qubole.agent()
         if name is not None:
-            result_json = conn.get(CommandTemplate.rest_entity_path, params={"template_name":name})
+            #s = "%s?template_name=%s" % (CommandTemplate.rest_entity_path, str(name))
+            result_json = (conn.get(CommandTemplate.rest_entity_path, params={"template_name":name}))
+            #result_json = (conn.get(s))
+            #print result_json["command_templates"][0]
             if result_json["command_templates"]:
                 return CommandTemplate(result_json["command_templates"][0])
         return None
