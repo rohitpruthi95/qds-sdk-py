@@ -10,6 +10,7 @@ import argparse
 class CommandTemplateCmdLine:
     hiveparser = None
     prestoparser = None
+    pigparser = None
     list_allparser = None
     viewparser = None
     removeparser = None
@@ -61,6 +62,26 @@ class CommandTemplateCmdLine:
         prestocmd.set_defaults(func=CommandTemplateCmdLine.prestocmd)
         
         CommandTemplateCmdLine.prestoparser = prestocmd
+
+        #Pig Command
+        pigcmd = subparsers.add_parser("pigcmd", help="Create a new pig query command template")
+
+        pigcmd.add_argument("--input_vars",
+            help="Add names and values for input variables", dest="input_vars", nargs="*")
+
+        pigcmdgroup = pigcmd.add_mutually_exclusive_group(required=True)
+
+        pigcmdgroup.add_argument("--query", dest="query", help="Pig query")
+
+        pigcmdgroup.add_argument("--script_location", dest="script_location", help="S3 path of script")
+
+        pigcmd.add_argument("--name", dest = "name", help="Pig query name", required = True)
+
+        pigcmd.add_argument("--macros", dest = "macros", help="Pig macros")
+
+        pigcmd.set_defaults(func=CommandTemplateCmdLine.pigcmd)
+        
+        CommandTemplateCmdLine.pigparser = pigcmd
 
         #list_all command
         list_all = subparsers.add_parser("list", help="List all available command templates")
@@ -122,6 +143,10 @@ class CommandTemplateCmdLine:
         return CommandTemplateCmdLine.prestoparser.format_help()
 
     @staticmethod
+    def get_pigcmd_help():
+        return CommandTemplateCmdLine.pigparser.format_help()
+
+    @staticmethod
     def get_list_all_help():
         return CommandTemplateCmdLine.list_allparser.format_help()
 
@@ -168,6 +193,11 @@ class CommandTemplateCmdLine:
         return json.dumps(result_json, sort_keys=True, indent=4)
 
     @staticmethod
+    def pigcmd(args):
+        result_json = CommandTemplate.pigcmd(args)
+        return json.dumps(result_json, sort_keys=True, indent=4)
+
+    @staticmethod
     def list_all(args):
         commandtemplateslist = CommandTemplate.list_all(args)
         if args.fields:
@@ -206,7 +236,6 @@ class CommandTemplateCmdLine:
             cmd = Command.find(cmd.id)
 
         if Command.is_success(cmd.status):
-            log.info("Fetching results for %s, Id: %s" % (cmdclass.__name__, cmd.id))
             return cmd.get_results(sys.stdout, delim='\t')
         else:
             return "Cannot fetch results - command Id: %s failed with status: %s" % (cmd.id, cmd.status)
@@ -311,19 +340,67 @@ class CommandTemplate(Resource):
 
         return result_json
 
+
+    @staticmethod
+    def pigcmd(args):
+        conn = Qubole.agent()
+        url_path = CommandTemplate.rest_entity_path
+        data = {}
+        if args.name is not None:
+            data['name'] = args.name
+        if args.macros is not None:
+            data['macros'] = json.loads(args.macros)
+        if args.input_vars is not None:
+            data['input_vars'] = []
+            for input_var in args.input_vars:
+                a = input_var.split("=")
+                input_var_data = {}
+                input_var_data['name'] = a[0]
+                if (len(a)>1):
+                    input_var_data['default_value'] = a[1]
+                data['input_vars'].append(input_var_data)
+        data['command'] = {}
+        
+        pigcmd_help = CommandTemplateCmdLine.get_pigcmd_help()
+        if args.script_location is not None:
+            if ((args.script_location.find("s3://") != 0) and
+                (args.script_location.find("s3n://") != 0)):
+
+                # script location is local file
+
+                try:
+                    q = open(args.script_location).read()
+                except IOError as e:
+                    raise ParseError("Unable to open script location: %s" %
+                                     str(e),
+                                     pigcmd_help)
+                data['command']['latin_statements'] = q
+            else:
+                data['command']['script_location'] = args.script_location
+    
+        if args.query is not None:
+            data['command']['latin_statements'] = args.query
+        data['command']['command_type'] = "PigCommand"
+        data['command_type'] = "PigCommand"
+
+        result_json = conn.post(CommandTemplate.rest_entity_path, data=data)
+
+        return result_json
+
+
     @staticmethod
     def list_all(args):
         conn = Qubole.agent()
         url_path = CommandTemplate.rest_entity_path
-        page_attr = []
+        page_attr = {}
         if args.page is not None:
-            page_attr.append("page=%s" % args.page)
+            page_attr["page"] = args.page
         if args.per_page is not None:
-            page_attr.append("per_page=%s" % args.per_page)
-        if page_attr:
-            url_path = "%s?%s" % (CommandTemplate.rest_entity_path, "&".join(page_attr))
-
-        myjson = conn.get(url_path)
+            page_attr["per_page"] = args.per_page
+        if len(page_attr):
+            myjson = conn.get(url_path, params = page_attr)
+        else:
+            myjson = conn.get(url_path)
         commandtemplateslist = []
         for commandtemplate in myjson['command_templates']:
             commandtemplateslist.append(CommandTemplate(commandtemplate))
@@ -333,10 +410,10 @@ class CommandTemplate(Resource):
     def find_by_name(name):
         conn = Qubole.agent()
         if name is not None:
-            #s = "%s?template_name=%s" % (CommandTemplate.rest_entity_path, str(name))
+            # s = "%s?template_name=%s" % (CommandTemplate.rest_entity_path, str(name))
             result_json = (conn.get(CommandTemplate.rest_entity_path, params={"template_name":name}))
-            #result_json = (conn.get(s))
-            #print result_json["command_templates"][0]
+            # result_json = (conn.get(s))
+            # print result_json["command_templates"][0]
             if result_json["command_templates"]:
                 return CommandTemplate(result_json["command_templates"][0])
         return None
